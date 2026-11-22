@@ -16,6 +16,15 @@
 | 🖥️**Web Application (Frontend)** | [**https://capymedi.185-176-252-232.sslip.io**](https://capymedi.185-176-252-232.sslip.io)                                                 | 🟢`Active 200 OK` |
 | 🔌**Backend API & Health Check**   | [**https://capymedi.185-176-252-232.sslip.io/api/v1/status**](https://capymedi.185-176-252-232.sslip.io/api/v1/status) | 🟢`Active 200 OK` |
 
+### 🔑 Tài khoản dùng thử
+
+| Vai trò | Cách vào |
+| :--- | :--- |
+| 👨‍⚕️ **Bác sĩ** | Đăng nhập tại [/login](https://capymedi.185-176-252-232.sslip.io/login) · Email: `bacsi02@capymedi.dev` · Mật khẩu: `Capy-ZSFZZ1km92` |
+| 🧑 **Bệnh nhân** | Tự đăng ký tại [/register](https://capymedi.185-176-252-232.sslip.io/register) |
+
+> ⚠️ Tài khoản bác sĩ là tài khoản demo **dùng chung**. Vui lòng **không nhập thông tin sức khoẻ thật** khi dùng thử.
+
 ## 📌 Vấn đề & Giải pháp (Problem & Solution)
 
 ### 1. Vấn đề thực tế (Clinical Pain Point)
