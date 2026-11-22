@@ -1,0 +1,363 @@
+// Lich uong thuoc va luong xac nhan bang anh THAT (ADR-0011), qua /api/doses
+// va /api/photo-verifications (route noi bo cua chinh FE, giu X-Internal-Secret
+// an toan phia server - cung mau voi lib/prescriptions.ts).
+
+export type MedicationImage = {
+  status: "AVAILABLE" | "NO_IMAGE";
+  url: string | null;
+  alt: string;
+  viewType: string | null;
+};
+
+export type DoseItem = {
+  drugId: string;
+  drugProductId: string | null;
+  tenThuoc: string;
+  soVien: number;
+  dangThuoc?: string;
+  duongDung?: string;
+  image: MedicationImage;
+};
+
+export type Dose = {
+  id: string;
+  prescriptionId: string;
+  scheduledAt: string;
+  windowStart: string;
+  windowEnd: string;
+  status: string; // PENDING|TAKEN|MISSED|DELAYED|CANCELLED|AWAITING_CAREGIVER
+  expectedItems: DoseItem[];
+  // >0 CHI tren ket qua tra ve tu updateDoseStatus() khi lan goi do VUA
+  // cong diem thuong (backend/api/dose_routes.py::_dose_summary). GET
+  // /doses (danh sach, listDoses()) luon la 0 - dung "gia tri co san",
+  // khong optional, de khoi phai ?? 0 o moi noi doc.
+  pointsAwarded: number;
+  // Lieu nay da tung duoc xac nhan bang anh va anh do van con. THEM
+  // 2026-08-31: truoc day man Lich su phai goi listPhotoVerifications() cho
+  // TUNG lieu de biet dieu nay - 147 request moi lan mo trang.
+  hasPhoto: boolean;
+};
+
+// dang_xu_ly khong nam trong 3 gia tri matcher.KetQua (khop/lech/khong_xac_minh_duoc)
+// - no ta trang thai XU LY, chua co ket qua nghiep vu (backend/services/
+// photo_verification/verifier.py). loi_he_thong tuong tu: mo hinh/mang loi,
+// khong phai loi cua benh nhan, khong tinh vao han muc chup lai.
+import { fetchCoXacThuc } from "@/lib/access-token";
+
+export type TrangThaiXacMinh =
+  "dang_xu_ly" | "khop" | "lech" | "khong_xac_minh_duoc" | "loi_he_thong" | "do_tin_cay_thap";
+export type NextAction = "NONE" | "RETAKE" | "CAREGIVER_REVIEW" | null;
+
+// TASK-CAPY-27 - ket qua xac minh anh CO CAU TRUC (api-contracts.md §5,
+// truong `verification`). Nhan dien anh KHONG chung minh da uong.
+export type VerificationResult = "MATCHED" | "MISMATCHED" | "UNCERTAIN";
+export type UncertaintyReason =
+  "UNKNOWN" | "UNCERTAIN" | "INSUFFICIENT_IMAGE" | "MULTIPLE_CANDIDATES" | "SYSTEM_ERROR";
+export type PhotoVerificationDetail = {
+  verificationResult: VerificationResult;
+  uncertaintyReason: UncertaintyReason | null;
+  extracted: {
+    name: string | null;
+    strength: string | null;
+    unit: string | null;
+    form: string | string[] | null;
+  };
+  evidenceSource: string[];
+  mismatchedFields: string[];
+  matchedPrescription: { drug_id: string | null; name: string } | null;
+  ocrConflict: boolean;
+  ocrVlmConflicts: string[];
+  ocrStatus: string | null;
+  nameStatus: string | null;
+  vlmStatus: "OK" | "UNAVAILABLE" | "ERROR" | null;
+};
+type PhotoVerificationDetailApi = {
+  verification_result: VerificationResult;
+  uncertainty_reason: UncertaintyReason | null;
+  extracted: PhotoVerificationDetail["extracted"];
+  evidence_source: string[];
+  mismatched_fields: string[];
+  matched_prescription: PhotoVerificationDetail["matchedPrescription"];
+  ocr_conflict: boolean;
+  ocr_vlm_conflicts?: string[];
+  ocr_status?: string | null;
+  name_status?: string | null;
+  vlm_status?: "OK" | "UNAVAILABLE" | "ERROR" | null;
+};
+
+export type PhotoVerification = {
+  id: string;
+  doseEventId: string;
+  attempt: number;
+  maxAttempts: number;
+  status: TrangThaiXacMinh;
+  matched: boolean | null;
+  expectedByForm: Record<string, number>;
+  detectedByForm: Record<string, number>;
+  confidence: string | null;
+  nextAction: NextAction;
+  message: string;
+  createdAt: string;
+  hasImage: boolean;
+  // >0 khi anh nay VUA duoc xac nhan khop va cong diem thuong. null khi
+  // khong ap dung (chua xong/khong khop/tre...) - phan biet voi 0 "co xet
+  // nhung khong duoc gi" (vd anh nay khong phai lieu cuoi trong ngay).
+  pointsAwarded: number | null;
+  verification: PhotoVerificationDetail | null;
+};
+
+type DoseApiItem = {
+  id: string;
+  prescription_id: string;
+  scheduled_at: string;
+  window_start: string;
+  window_end: string;
+  status: string;
+  has_photo?: boolean;
+  expected_items: {
+    drug_id: string;
+    drug_product_id?: string | null;
+    ten_thuoc: string;
+    so_vien?: number;
+    dang_thuoc?: string;
+    duong_dung?: string;
+    image?: {
+      status: "AVAILABLE" | "NO_IMAGE";
+      url: string | null;
+      alt: string;
+      view_type: string | null;
+    };
+  }[];
+  points_awarded?: number;
+};
+
+type PhotoVerificationApi = {
+  id: string;
+  dose_event_id: string;
+  attempt: number;
+  max_attempts: number;
+  status: TrangThaiXacMinh;
+  matched: boolean | null;
+  expected_by_form: Record<string, number>;
+  detected_by_form: Record<string, number>;
+  confidence: string | null;
+  next_action: NextAction;
+  message: string;
+  created_at: string;
+  has_image: boolean;
+  points_awarded: number | null;
+  verification?: PhotoVerificationDetailApi | null;
+};
+
+// Nhan hien thi cho trang thai lieu THAT (backend/db/models.py::DoseEvent) -
+// dung chung boi patient/page.tsx (hom nay) va patient/history/page.tsx.
+export const NHAN_TRANG_THAI_LIEU: Record<string, string> = {
+  PENDING: "Chờ xác nhận",
+  TAKEN: "Đã uống",
+  DELAYED: "Đã uống (trễ giờ)",
+  MISSED: "Bỏ liều",
+  CANCELLED: "Đã huỷ",
+  AWAITING_CAREGIVER: "Chờ người thân duyệt",
+};
+
+export function moTaThuoc(dose: Dose): string {
+  return dose.expectedItems
+    .map((it) => `${it.tenThuoc} (${it.soVien} ${it.dangThuoc ?? "đơn vị"})`)
+    .join(", ");
+}
+
+export function gioHienThi(iso: string): string {
+  return new Date(iso).toLocaleTimeString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function ngayHienThi(iso: string): string {
+  return new Date(iso).toLocaleDateString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+async function loi(response: Response): Promise<never> {
+  const body = await response.json().catch(() => null);
+  const detail = body?.detail;
+  const message =
+    typeof detail === "string"
+      ? detail
+      : (detail?.message ?? `Yêu cầu thất bại (${response.status})`);
+  throw new Error(message);
+}
+
+function toDose(d: DoseApiItem): Dose {
+  return {
+    id: d.id,
+    prescriptionId: d.prescription_id,
+    scheduledAt: d.scheduled_at,
+    windowStart: d.window_start,
+    windowEnd: d.window_end,
+    status: d.status,
+    expectedItems: (d.expected_items ?? []).map((it) => ({
+      drugId: it.drug_id,
+      drugProductId: it.drug_product_id ?? null,
+      tenThuoc: it.ten_thuoc,
+      soVien: it.so_vien ?? 0,
+      dangThuoc: it.dang_thuoc,
+      duongDung: it.duong_dung,
+      image: {
+        status: it.image?.status ?? "NO_IMAGE",
+        url: it.image?.url ?? null,
+        alt: it.image?.alt ?? "Chưa có hình ảnh thuốc",
+        viewType: it.image?.view_type ?? null,
+      },
+    })),
+    pointsAwarded: d.points_awarded ?? 0,
+    hasPhoto: d.has_photo ?? false,
+  };
+}
+
+function toPhotoVerification(p: PhotoVerificationApi): PhotoVerification {
+  return {
+    id: p.id,
+    doseEventId: p.dose_event_id,
+    attempt: p.attempt,
+    maxAttempts: p.max_attempts,
+    status: p.status,
+    matched: p.matched,
+    expectedByForm: p.expected_by_form,
+    detectedByForm: p.detected_by_form,
+    confidence: p.confidence,
+    nextAction: p.next_action,
+    message: p.message,
+    createdAt: p.created_at,
+    hasImage: p.has_image,
+    pointsAwarded: p.points_awarded,
+    verification: p.verification
+      ? {
+          verificationResult: p.verification.verification_result,
+          uncertaintyReason: p.verification.uncertainty_reason,
+          extracted: p.verification.extracted,
+          evidenceSource: p.verification.evidence_source,
+          mismatchedFields: p.verification.mismatched_fields,
+          matchedPrescription: p.verification.matched_prescription,
+          ocrConflict: p.verification.ocr_conflict,
+          ocrVlmConflicts: p.verification.ocr_vlm_conflicts ?? [],
+          ocrStatus: p.verification.ocr_status ?? null,
+          nameStatus: p.verification.name_status ?? null,
+          vlmStatus: p.verification.vlm_status ?? null,
+        }
+      : null,
+  };
+}
+
+export async function listDoses(patientId: string): Promise<Dose[]> {
+  const response = await fetchCoXacThuc(`/api/doses?patient_id=${encodeURIComponent(patientId)}`);
+  if (!response.ok) return loi(response);
+  const items: DoseApiItem[] = await response.json();
+  return items.map(toDose);
+}
+
+export async function updateDoseStatus(
+  doseId: string,
+  status: string,
+  accessToken?: string | null,
+): Promise<Dose> {
+  const response = await fetchCoXacThuc(
+    `/api/doses/${encodeURIComponent(doseId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    },
+    accessToken,
+  );
+  if (!response.ok) return loi(response);
+  return toDose(await response.json());
+}
+
+/**
+ * Gửi ảnh xác nhận. Trả về ngay (202) — một lần gọi mô hình đo được 26 đến
+ * 265 giây, backend không giữ request chờ. Dùng `pollPhotoVerification` để
+ * hỏi lại kết quả.
+ */
+export async function submitDosePhoto(
+  doseId: string,
+  file: File | Blob,
+): Promise<PhotoVerification> {
+  const form = new FormData();
+  form.append("file", file, "anh_thuoc.jpg");
+
+  const response = await fetchCoXacThuc(`/api/doses/${encodeURIComponent(doseId)}/photo`, {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) return loi(response);
+  const data = await response.json();
+  // POST tra PhotoSubmitResponse (verification_id) - goi lai GET 1 lan de co
+  // du hinh dang PhotoVerification, khong tu ghep tay o day tranh 2 nguon
+  // dinh dang lech nhau.
+  return getPhotoVerification(data.verification_id);
+}
+
+export async function getPhotoVerification(verificationId: string): Promise<PhotoVerification> {
+  const response = await fetchCoXacThuc(
+    `/api/photo-verifications/${encodeURIComponent(verificationId)}`,
+  );
+  if (!response.ok) return loi(response);
+  return toPhotoVerification(await response.json());
+}
+
+/** Toàn bộ lịch sử gửi ảnh của 1 liều — dùng cho patient/history khi bấm vào 1 dòng. */
+export async function listPhotoVerifications(doseId: string): Promise<PhotoVerification[]> {
+  const response = await fetchCoXacThuc(
+    `/api/doses/${encodeURIComponent(doseId)}/photo-verifications`,
+  );
+  if (!response.ok) return loi(response);
+  const items: PhotoVerificationApi[] = await response.json();
+  return items.map(toPhotoVerification);
+}
+
+/**
+ * Lỗi tải ảnh xác minh kèm mã HTTP, để giao diện phân biệt "ảnh không còn"
+ * (404) với "hết phiên / không có quyền" (401/403) - trước đây mọi lỗi đều
+ * hiện "Ảnh không còn trên máy chủ".
+ */
+export class LoiTaiAnh extends Error {
+  constructor(public readonly status: number) {
+    super(`Không tải được ảnh (${status})`);
+    this.name = "LoiTaiAnh";
+  }
+}
+
+/** Ảnh gốc của 1 lần xác minh (PHI) — tải kèm JWT; dùng qua components/photo-verification-image.tsx. */
+export async function getPhotoVerificationImage(verificationId: string): Promise<Blob> {
+  const response = await fetchCoXacThuc(
+    `/api/photo-verifications/${encodeURIComponent(verificationId)}/image`,
+  );
+  if (!response.ok) throw new LoiTaiAnh(response.status);
+  return response.blob();
+}
+
+const KHOANG_CACH_HOI_LAI_MS = 6000;
+const SO_LAN_HOI_TOI_DA = 60; // 60 x 6s = 6 phut, du rong cho tran 265s da do duoc
+
+/**
+ * Hỏi lại tới khi có kết quả thật (không còn "dang_xu_ly"). `onCapNhat` được
+ * gọi sau MỖI lần hỏi (kể cả khi vẫn đang xử lý) để UI cập nhật số lần đã chờ.
+ */
+export async function pollPhotoVerification(
+  verificationId: string,
+  onCapNhat?: (v: PhotoVerification) => void,
+): Promise<PhotoVerification> {
+  for (let lan = 0; lan < SO_LAN_HOI_TOI_DA; lan++) {
+    const ketQua = await getPhotoVerification(verificationId);
+    onCapNhat?.(ketQua);
+    if (ketQua.status !== "dang_xu_ly") return ketQua;
+    await new Promise((r) => setTimeout(r, KHOANG_CACH_HOI_LAI_MS));
+  }
+  throw new Error("Phân tích ảnh mất quá lâu, bác thử lại giúp cháu nhé.");
+}

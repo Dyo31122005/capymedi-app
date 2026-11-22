@@ -1,0 +1,53 @@
+.git
+.gitignore
+.env
+.venv
+# Pattern khong co dau `/` chi khop o goc context, nen `.venv`/`__pycache__` o
+# tren KHONG bao gom backend/.venv (venv dev nam duoi backend/ sau khi doi ten
+# src/ -> backend/). Them dang `**/` de loai o moi cap.
+**/.venv
+**/__pycache__
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+docs/
+presentation/
+eval/
+# Service backend rieng, khong dung file nao trong day (Next.js co Dockerfile/
+# deploy rieng) - thieu dong nay lam build context phinh len ca GB vi
+# frontend/node_modules va frontend/.next, khien buoc "transferring context"
+# cham hang chuc phut moi lan build local.
+frontend/
+data pharmacy/*
+!data pharmacy/v2/
+data pharmacy/v2/*
+!data pharmacy/v2/final_canonical/
+data pharmacy/v2/final_canonical/*
+!data pharmacy/v2/final_canonical/manifest.json
+!data pharmacy/v2/final_canonical/drug_product.jsonl
+!data pharmacy/v2/final_canonical/drug_id_map.jsonl
+!data pharmacy/v2/final_canonical/drug_product_ingredient.jsonl
+!data pharmacy/v2/final_canonical/drug_knowledge.jsonl
+!data pharmacy/v2/final_canonical/rag/
+data pharmacy/v2/final_canonical/rag/*
+!data pharmacy/v2/final_canonical/rag/v2_chunks.jsonl
+!data pharmacy/v2/final_canonical/rag/v2_embedding_index.jsonl
+*.md
+!requirements.txt
+!scripts/
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Thu muc local phat sinh tren may dev (git worktrees, venv rieng, staging import,
+# storage anh local) - khong phai input cua backend; tren Windows con gay
+# "Access is denied" khi docker gom build context. Cung danh sach voi .railwayignore.
+.worktrees/
+.venv-drug-image/
+_prod_import_staging/
+_prod_import_staging_flat/
+local_drug_image_storage/
+data/drug_images/
+data/photo_verifications/
+data/rag-eval/

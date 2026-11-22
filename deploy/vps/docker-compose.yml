@@ -1,0 +1,111 @@
+# CapyMedi tren 1 VPS (Contabo Cloud VPS 4: 4 vCPU / 8 GB) - ADR-0015.
+#
+# Chay tren VPS (scripts/deploy_vps.sh lam viec nay):
+#   docker compose --env-file /opt/capymedi/.env up -d --build
+#
+# /opt/capymedi/.env chua secret that (khong commit) - mau o deploy/vps/.env.example.
+# Caddy la cua vao duy nhat (80/443, tu xin chung chi HTTPS). Postgres KHONG
+# mo cong ra ngoai.
+name: capymedi
+
+services:
+  db:
+    # Image chinh thuc cua pgvector, co san vector + pg_trgm + unaccent (migration 0001).
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vmec
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?thieu POSTGRES_PASSWORD trong /opt/capymedi/.env}
+      POSTGRES_DB: vmec04
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vmec -d vmec04"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - /opt/capymedi/.env
+    environment:
+      APP_ENV: production
+      PORT: "8000"
+      DATABASE_URL: postgresql://vmec:${POSTGRES_PASSWORD}@db:5432/vmec04
+      CORS_ORIGINS: https://${DOMAIN:?thieu DOMAIN}
+      # 1 thu muc tren VPS (/opt/capymedi/storage) giu moi anh: xac nhan lieu,
+      # anh thuoc catalog, anh dinh kem bac si. Nam ngoai container nen ton tai
+      # qua moi lan deploy.
+      PHOTO_STORAGE_DIR: /app/data/storage/photo_verifications
+      DRUG_IMAGE_STORAGE_DIR: /app/data/storage/drug_images
+      DRUG_IMAGE_CHAT_DOCTOR_STORAGE_DIR: /app/data/storage/drug_image_chat_doctor_private
+    volumes:
+      - /opt/capymedi/storage:/app/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    # Backend nap Drug Knowledge V2 + model OpenCLIP luc khoi dong (~3 GB that,
+    # tung OOM o 2 GB tren Cloud Run). Chi 1 container: APScheduler nhac thuoc
+    # chay trong tien trinh, 2 ban se chay trung job (ADR-0007).
+    mem_limit: 5g
+
+  frontend:
+    build:
+      context: ../../frontend
+      args:
+        # Build-time: Next.js nhung thang vao bundle. Cung domain voi trang web,
+        # Caddy chuyen /api/v1/* sang backend.
+        NEXT_PUBLIC_API_URL: https://${DOMAIN}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?thieu INTERNAL_AUTH_SECRET}
+      # Phan Next dung san tren may chu (SSR) hien gio theo gio Viet Nam thay vi
+      # UTC (2026-11-14). Backend GIU UTC: code luu tru/so sanh gia dinh UTC va
+      # tu doi sang gio VN khi can (generator.GIO_VN, reward_ledger.ngay_vn).
+      TZ: Asia/Ho_Chi_Minh
+    # Route BFF cua Next (vd /api/auth/login) goi backend qua https://DOMAIN.
+    # Tro domain ve chinh may host de khong phai vong ra Internet roi quay lai.
+    extra_hosts:
+      - "${DOMAIN}:host-gateway"
+    depends_on:
+      - backend
+    mem_limit: 768m
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+    mem_limit: 256m
+
+networks:
+  default:
+    # Bat IPv6 (2026-11-13): api.openai.com co ca IPv4 lan IPv6. Mang Docker mac
+    # dinh chi co IPv4 nen moi ket noi IPv6 tu container deu hong
+    # ("Network is unreachable"); luc DNS chi tra dia chi IPv6 hoac IPv4 truc
+    # trac thi goi VLM that bai. May chu co IPv6 that, Docker tu cap dai ULA va NAT.
+    enable_ipv6: true
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

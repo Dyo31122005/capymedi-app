@@ -1,0 +1,81 @@
+# Loai khoi goi upload cua `railway up` (backend FastAPI).
+#
+# `railway up` da tu bo qua .gitignore + .git + node_modules, nen file nay chi
+# can liet ke nhung thu CO TRONG GIT nhung KHONG can de build/chay backend.
+# Muc dich: goi upload nho (upload nhanh, build context nho), khong phai bao mat.
+#
+# Khac voi .dockerignore: .dockerignore loc luc BUILD (sau khi da upload xong),
+# file nay loc luc UPLOAD - thu bi loai o day khong bao gio roi khoi may.
+
+# Cac thu muc local phat sinh sau (chua co trong .gitignore luc file nay
+# duoc tao 2026-08-22) gay "Access is denied" khi railway CLI quet/index de
+# upload tren Windows (venv rieng, git worktrees, staging import, storage
+# local) - khong phai runtime input cua backend, loai het.
+.venv-drug-image/
+.worktrees/
+_prod_import_staging/
+_prod_import_staging_flat/
+local_drug_image_storage/
+data/drug_images/
+data/photo_verifications/
+data/rag-eval/
+
+# Frontend Next.js - service Railway RIENG (VMEC-04/FE), deploy bang
+# `cd frontend && railway up`. Thu muc frontend/ da duoc `railway link` rieng nen
+# goi upload cua no chi gom frontend/, khong dinh file nao o day.
+frontend/
+.env
+
+# Legacy data and crawler stay out of the backend upload. Only the promoted
+# Final Canonical V2 artifact and its rebuilt RAG index are runtime inputs.
+data pharmacy/*
+!data pharmacy/v2/
+data pharmacy/v2/*
+!data pharmacy/v2/final_canonical/
+data pharmacy/v2/final_canonical/*
+!data pharmacy/v2/final_canonical/manifest.json
+!data pharmacy/v2/final_canonical/drug_product.jsonl
+!data pharmacy/v2/final_canonical/drug_id_map.jsonl
+!data pharmacy/v2/final_canonical/drug_product_ingredient.jsonl
+!data pharmacy/v2/final_canonical/drug_knowledge.jsonl
+!data pharmacy/v2/final_canonical/rag/
+data pharmacy/v2/final_canonical/rag/*
+!data pharmacy/v2/final_canonical/rag/v2_chunks.jsonl
+!data pharmacy/v2/final_canonical/rag/v2_embedding_index.jsonl
+crawler/
+
+# Tooling VLM dem thuoc dung rieng (requirements.txt rieng), khong duoc
+# backend/main.py hay bat ky module nao trong backend/api|agents|services import.
+backend/vlm_demthuoc/
+
+# Venv dev cua may (nam duoi backend/ sau khi doi ten src/ -> backend/).
+# .gitignore da bo qua .venv/ nen `railway up` cung khong upload, nhung liet ke
+# tuong minh de nguoi doc sau khong tuong no di theo backend/ len server.
+backend/.venv/
+
+# Tai lieu, ke hoach, slide - khong anh huong build/runtime
+docs/
+adrs/
+planning/
+presentation/
+specs/
+tasks/
+eval/
+.agents/
+.ai-log/
+*.md
+
+# Test + tooling local
+tests/
+scripts/*
+!scripts/safe_migrate.py
+docker-compose.yml
+Makefile
+ruff.toml
+
+# Cau hinh IDE/agent local
+.claude/
+.codex/
+.cursor/
+.gemini/
+.github/

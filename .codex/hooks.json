@@ -1,0 +1,41 @@
+{
+  "description": "Record Codex prompts, tool calls, and completed turns in the repository AI log.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'root=\"$(git rev-parse --show-toplevel)\" && cd \"$root\" && bash \"$root/scripts/_pyrun.sh\" \"$root/scripts/log_hook.py\" --tool=codex'",
+            "commandWindows": "$root = git rev-parse --show-toplevel; Set-Location -LiteralPath $root; & (Join-Path $root 'scripts\\_pyrun.cmd') (Join-Path $root 'scripts\\log_hook.py') '--tool=codex'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'root=\"$(git rev-parse --show-toplevel)\" && cd \"$root\" && bash \"$root/scripts/_pyrun.sh\" \"$root/scripts/log_hook.py\" --tool=codex'",
+            "commandWindows": "$root = git rev-parse --show-toplevel; Set-Location -LiteralPath $root; & (Join-Path $root 'scripts\\_pyrun.cmd') (Join-Path $root 'scripts\\log_hook.py') '--tool=codex'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'root=\"$(git rev-parse --show-toplevel)\" && cd \"$root\" && bash \"$root/scripts/_pyrun.sh\" \"$root/scripts/log_hook.py\" --tool=codex'",
+            "commandWindows": "$root = git rev-parse --show-toplevel; Set-Location -LiteralPath $root; & (Join-Path $root 'scripts\\_pyrun.cmd') (Join-Path $root 'scripts\\log_hook.py') '--tool=codex'",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

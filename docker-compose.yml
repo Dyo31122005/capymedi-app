@@ -1,0 +1,125 @@
+# CapyMedi - stack LOCAL/DEMO. Khoi dong: `docker compose up --build -d`
+# Cau hinh DUY NHAT: file `.env` o thu muc goc (git ignore) - xem .env.example.
+#
+# Thu tu: db (healthy) -> migrate (alembic, chay xong) -> backend (healthy)
+#         -> frontend ; demo-seed (1 lan, chi khi APP_ENV=demo + ENABLE_DEMO_SEED=true,
+#         chi KHOI TAO NEU CHUA CO - khong reset du lieu demo da dung).
+# KHONG dung `docker compose down -v` (xoa volume = mat du lieu).
+name: capymedi
+
+x-backend-build: &backend-build
+  context: .
+  dockerfile: Dockerfile
+
+# Bien chung cho cac service dung image backend. `environment:` GHI DE `env_file:`.
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql://${POSTGRES_USER:-vmec}:${POSTGRES_PASSWORD:-vmec}@db:5432/${CAPYMEDI_DB_NAME:-vmec04}
+  PHOTO_STORAGE_DIR: /app/data/photo_verifications
+  CAPYMEDI_DEMO_API_URL: http://backend:8000
+
+services:
+  db:
+    # Image chinh thuc cua pgvector, build tren postgres:16, da co san extension
+    # vector + contrib modules (pg_trgm, unaccent) - xem ADR-0008.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vmec}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vmec}
+      POSTGRES_DB: ${POSTGRES_DB:-vmec04}
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vmec} -d ${POSTGRES_DB:-vmec04}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build: *backend-build
+    image: capymedi-backend:local
+    env_file: [.env]
+    environment: *backend-env
+    command: ["sh", "-c", "python scripts/docker/ensure_database.py && alembic upgrade head && echo '[migrate] OK'"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build: *backend-build
+    image: capymedi-backend:local
+    env_file: [.env]
+    environment: *backend-env
+    # Migration do service `migrate` lo (1 lan) - backend chi chay uvicorn.
+    command: ["sh", "-c", "exec uvicorn backend.main:app --host 0.0.0.0 --port 8000"]
+    ports:
+      - "127.0.0.1:${BACKEND_HOST_PORT:-8001}:8000"
+    volumes:
+      - photos:/app/data/photo_verifications
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  demo-seed:
+    build: *backend-build
+    image: capymedi-backend:local
+    env_file: [.env]
+    environment: *backend-env
+    # Doi so mac dinh `--auto`; lenh chu dong:
+    #   docker compose run --rm demo-seed --prepare-patient3
+    #   docker compose run --rm demo-seed --reset
+    entrypoint: ["/usr/local/bin/docker-entrypoint.sh", "python", "scripts/seed_hackathon_demo.py"]
+    command: ["--auto"]
+    volumes:
+      # Chi doc - de nap danh muc thuoc khi DB moi tinh (bang drug trong).
+      - type: bind
+        source: ./data pharmacy
+        target: /app/data pharmacy
+        read_only: true
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: "no"
+
+  frontend:
+    build:
+      context: ./frontend
+      # Kho pnpm cua may host (tuy chon) - cai deps offline; khong co thi dat
+      # PNPM_STORE_DIR toi thu muc rong bat ky, build se tai online.
+      additional_contexts:
+        pnpm-store: ${PNPM_STORE_DIR:-./scripts/docker/pnpm-store-empty}
+      args:
+        # Mac dinh node:24-slim (giong Railway); local co the dat FRONTEND_NODE_IMAGE.
+        NODE_IMAGE: ${FRONTEND_NODE_IMAGE:-node:24-slim}
+        # NHUNG vao bundle luc build - URL trinh duyet goi backend (cong host).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+    image: capymedi-frontend:local
+    # KHONG dung env_file .env: frontend chi nhan dung 2 bien server-only duoi day.
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET}
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-3010}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  photos:

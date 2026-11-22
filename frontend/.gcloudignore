@@ -1,0 +1,11 @@
+# Loai khoi goi upload cua `gcloud builds submit` (frontend Next.js) - ADR-0014.
+# Giong frontend/.dockerignore: node_modules/.next cua may Windows khong duoc
+# lot vao build context.
+#!include:.gitignore
+.git
+.gcloudignore
+node_modules/
+.next/
+.env
+.env.*
+!.env.example
